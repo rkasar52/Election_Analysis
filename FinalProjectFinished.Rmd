@@ -1,0 +1,793 @@
+---
+title: "Final Project"
+author: "Rahul Kasar (PSTAT 231, Perm 9599333) and Kaitlyn Boyle (PSTAT 131, Perm 8595332)"
+date: "6/4/2018"
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r libraries, include=FALSE, message=FALSE}
+library(tidyverse)
+library(dplyr)
+library(tree)
+library(plyr)
+library(randomForest)
+library(class)
+library(rpart)
+library(maptree)
+library(ROCR)
+library(knitr)
+
+```
+
+```{r reading data, cache=TRUE, echo=FALSE}
+election.raw = read.csv("election.csv") %>% as.tbl
+census_meta = read.csv("metadata.csv", sep = ";") %>% as.tbl
+census = read.csv("census.csv") %>% as.tbl
+census$CensusTract = as.factor(census$CensusTract)
+
+```
+
+
+```{r Question 4 5, cache=TRUE, echo=FALSE, message=FALSE}
+fips=election.raw$fips
+
+#county data only
+index1=which(!is.na(as.numeric(as.character(fips))))
+election=election.raw[index1,]
+index=which(is.na(as.numeric(as.character(fips))))
+temp=election.raw[index,]
+
+#federal data only
+election_federal=filter(temp, fips=='US')
+
+#state data only
+election_state=filter(temp, fips!= 'US')
+
+
+election.raw=election.raw %>% drop_na()
+
+## 31 named presidential candidates. 
+
+ggplot(data=election_federal)+geom_bar(mapping=aes(x=candidate, y=votes),stat='identity')+theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+```
+Question 6
+```{r Question 6,cache=TRUE, echo = FALSE}
+#state winner
+election_state=election_state %>% group_by(fips) %>% mutate(total=sum(votes), state) %>% mutate(pct=votes/total)
+
+state_winner= election_state %>% group_by(state)%>% top_n(n=1, wt=pct)
+
+#county winner
+election=election%>% group_by(fips) %>% mutate(total=sum(votes), state) %>% mutate(pct=votes/total)
+
+county_winner = election %>% group_by(fips) %>% top_n(n=1, wt=pct)
+
+```
+
+```{r table of state winner, echo=FALSE, cache=TRUE}
+kable(head(state_winner), caption = 'State Winner')
+```
+
+```{r table of county winnter, echo =FALSE, cache=TRUE}
+kable(head(county_winner), caption = 'County Winner')
+```
+
+#County Level Map
+
+```{r Question 7, echo=FALSE, cache=TRUE, message=FALSE}
+states = map_data("state")
+counties = map_data("county")
+
+#fips = state.abb[match(states$region, some_function(state.name))]
+ggplot(data = counties) + 
+  geom_polygon(aes(x = long, y = lat, fill = subregion, group = group), color = "white") + 
+  coord_fixed(1.3) +
+  guides(fill=FALSE) # color legend is unnecessary and takes too long
+```
+
+##State Winner
+```{r, question 8, echo=FALSE, cache=TRUE}
+#country map colored by state winner
+
+#get data sets to match(lowercase)
+fips = state.abb[match(states$region, tolower(state.name))]
+states=states %>% mutate(fips=state.abb[match(states$region, tolower(state.name))])
+states$fips = as.factor(states$fips)
+
+
+#combine dataframes
+s=left_join(state_winner, states, by='fips')
+
+ggplot(data = s) + 
+  geom_polygon(aes(x = long, y = lat, fill = candidate, group = group), color = "white") + 
+  coord_fixed(1.3) +
+  guides(fill=FALSE) 
+
+```
+
+##County Winner
+```{r Question 9, echo=FALSE, cache=TRUE}
+#country map filled by county winner
+
+temp=maps::county.fips
+countyfips=temp%>%
+separate(polyname, c("region", "subregion"), ",")
+countyfips$fips=as.factor(countyfips$fips)
+
+r=left_join(counties, countyfips, by='subregion')
+c=left_join(county_winner, r, by='fips')
+
+ggplot(data = c) + 
+  geom_polygon(aes(x = long, y = lat, fill = candidate, group = group), color = "white") + 
+  coord_fixed(1.3) +
+  guides(fill=FALSE) 
+
+```
+
+
+```{r creating swing red blue, echo=FALSE, eval=FALSE, cache=TRUE}
+#creating a sample of swing blue and red states. 
+swing= subset(election.c, state == 'michigan' | state=='ohio' |state=='florida' | state=='pennsylvania' |state=='nevada' |state=='north carolina' )
+
+blue.state = subset(election.c, state == 'california' | state == 'washington' |state == 'new york' | state == 'oregon')
+red.state = subset( election.c, state == 'texas' | state == 'georgia' |state == 'kentucky' | state == ' virginia')
+```
+
+
+```{r Question 10, echo=FALSE, results='hide', eval=FALSE, cache=TRUE}
+par(mar=c(1,1,1,1))
+par(mfrow=c(3,4))
+##Minority vs Income
+ggplot(data=election.cl)+geom_point(mapping=aes(x=Income, y=Minority, color=candidate))+ggtitle('Minority vs Income All States')
+ggplot(data=swing)+geom_point(mapping=aes(x=Income, y=Minority, color=candidate))+ggtitle('Minority vs Income Swing States')
+ggplot(data=red)+geom_point(mapping=aes(x=Income, y=Minority, color=candidate))+ggtitle('Minority vs Income Red States')
+ggplot(data=blue)+geom_point(mapping=aes(x=Income, y=Minority, color=candidate))+ggtitle('Minority vs Income Blue States')
+
+
+
+ggplot(data=election.cl)+geom_point(mapping=aes(x=Employed, y=FamilyWork, color=candidate))+ggtitle('Transit vs Employed All States')
+ggplot(data=swing)+geom_point(mapping=aes(x=Employed, y=FamilyWork, color=candidate))+ggtitle('Transit vs Employed Swing States')
+ggplot(data=red)+geom_point(mapping=aes(x=Employed, y=FamilyWork, color=candidate))+ggtitle('Transit vs Employed Red States')
+ggplot(data=blue)+geom_point(mapping=aes(x=Employed, y=FamilyWork, color=candidate))+ggtitle('Transit vs Employed Blue States')
+
+
+ggplot(data=election.cl)+geom_point(mapping=aes(x=Professional, y=Service, color=candidate))+ggtitle('Professional vs Service All States')
+ggplot(data=swing)+geom_point(mapping=aes(x=Professional, y=Service, color=candidate))+ggtitle('Professional vs Service Swing States')
+ggplot(data=red)+geom_point(mapping=aes(x=Professional, y=Service, color=candidate))+ggtitle('Professional vs Service Red States')
+ggplot(data=blue)+geom_point(mapping=aes(x=Professional, y=Service, color=candidate))+ggtitle('Professional vs Service Blue States')
+
+```
+
+
+
+
+```{r Question 11a, echo=FALSE, cache=TRUE}
+#cleaning census data
+
+census.del= census %>% drop_na()
+census.del$Walk <- NULL
+census.del$PublicWork <- NULL
+census.del$Construction <- NULL
+
+census.del$Men = census.del$Men*(100/census.del$TotalPop)
+census.del$Women=census.del$Women*(100/census.del$TotalPop)
+census.del$Employed = census.del$Employed*(100/census.del$TotalPop)
+census.del$Citizen =census.del$Citizen *(100/census.del$TotalPop)
+
+census.del=census.del %>%
+  mutate(Minority = Hispanic+Black+Native+Asian+Pacific)
+
+```
+
+```{r Question 11 b, echo=FALSE, cache=TRUE}
+#need weight because different rows have different population. 
+
+census.subct = census.del %>%
+  group_by(State, County) %>%
+  add_tally(TotalPop) %>%
+  mutate(CountyTotal=n, Weight=TotalPop/CountyTotal)
+census.subct$n <- NULL
+
+#delete because of collinearity 
+census.subct$Women <- NULL
+census.subct$Hispanic <-NULL
+
+#multiply everything by weight. 
+census.subct=census.subct[,-c(7:10)]
+census.ct = census.subct %>%
+  mutate_at(vars(Men:Minority), funs((. * Weight))) %>% summarise_at(vars(c(TotalPop:Minority)), funs(sum))
+
+state.1= census.ct %>%
+  group_by(State) %>%
+  add_tally(TotalPop) %>%
+  mutate(CountyTotal=n, Weight=TotalPop/CountyTotal)
+
+#Data at state level
+state = state.1 %>%
+  mutate_at(vars(Men:Minority), funs((. * Weight))) %>% summarise_at(vars(c(TotalPop:Minority)), funs(sum))
+
+
+```
+
+##Census.ct
+```{r head ct, echo=FALSE, cache=TRUE}
+head(census.ct)
+```
+
+```{r kable}
+
+kable(head(census.ct))
+```
+
+```{r Question 12, echo=FALSE, cache=TRUE}
+#principal component analysis for county and subcounty. 
+pr.ct=prcomp(census.ct[,-c(1,2)], center=TRUE, scale=TRUE)
+ct.pc=pr.ct$rotation[,c(1,2)]
+
+pr.subct=prcomp(census.subct[,-c(1,2,3)], center=TRUE, scale=TRUE)
+subct.pc=pr.subct$rotation[,c(1,2)]
+
+```
+
+
+```{r Question 13, echo=FALSE}
+#proportion of variance explained County
+ct.var=pr.ct$sdev^2
+pve.ct=ct.var/sum(ct.var)
+ plot(pve.ct, xlab="Principal Component",
+ylab="Proportion of Variance Explained County ",  main='County Variance',ylim=c(0,1),type='b')
+ plot(cumsum(pve.ct), xlab="Principal Component ",
+ylab=" Cumulative Proportion of Variance Explained County ", main='County Variance',ylim=c(0,1), type='b')
+abline(h=0.9)
+#13 principle components explain 90% of the variance for county.
+```
+
+```{r subcounty pve, cache=TRUE, echo =FALSE}
+#proportion of variance explained subcounty
+st.var=pr.subct$sdev^2
+pve.sub=st.var/sum(st.var)
+ plot(pve.sub, xlab="Principal Component",
+ylab="Proportion of Variance Explained ",  main='Subcounty Variance',ylim=c(0,1),type='b')
+ plot(cumsum(pve.sub), xlab="Principal Component ",
+ylab=" Cumulative Proportion of Variance Explained ", main='Subcounty Variance',ylim=c(0,1), type='b')
+abline(h=0.9)
+
+#16 principle components. 
+```
+
+
+```{r Question 14, echo=FALSE, cache=TRUE}
+set.seed(1)
+library(cluster)
+
+#scale census data
+scounty=scale(census.ct[,-c(1,2)], center=TRUE, scale=TRUE)
+#find the distance
+county.dist=dist(scounty)
+#run hierarchial clustering
+county.hclust=hclust(county.dist, method='complete')
+
+#plot of full hierarchial Cluster
+plot(county.hclust, main='Hierarchial Clustering Original Data')
+
+#cut tree to 10 groups
+county.10=cutree(county.hclust, 10)
+
+#plot of what each group looks like 
+plot(county.10, main='10 groups Original Data')
+#which group is San Mateo in (227), its in group 2. 
+
+san.mateo=census.ct[227,]
+san.mateo=san.mateo[,-c(1,2)]
+group2=which(county.10==2)
+#create dataframe with all counties from gorup 2. 
+group.2=census.ct[group2,]
+
+```
+
+
+
+
+```{r Question 14b, echo=FALSE, cache=TRUE}
+#get first five principal components. 
+five=pr.ct$x[,1:5]
+
+#scale
+five.dist=dist(five)
+#run HC
+five.hclust=hclust(five.dist, method='complete')
+#cut tree
+pclus=cutree(five.hclust, 10)
+#plot of each group
+plot(pclus, main='Hierarchial Clustering using PCA Data')
+# San Mateo is in group 7
+#create group with all counties in group 7
+group7=which(pclus==7)
+group.7=census.ct[group7,]
+
+```
+
+```{r computing cluster center, echo=FALSE, cache=TRUE}
+#scale group 2
+scale.two= scale(group.2[, -c(1,2)], center=TRUE, scale=TRUE)
+#find the means of all columns
+means.normal=colMeans(scale.two)
+#convert to matrix
+means.normal=as.matrix(means.normal)
+#find SSE, divide by number of rows. 
+sse.normal=sum((san.mateo-means.normal)^2)/501
+
+#scale group 7
+scale.seven= scale(group.7[, -c(1,2)], center=TRUE, scale=TRUE)
+#find the means of all columns
+means.pca=colMeans(scale.seven)
+#convert to matrix
+means.pca=as.matrix(means.pca)
+#find SSE.
+sse.pca=sum((san.mateo-means.pca)^2)/47
+
+kable(sse.normal, caption='SSE from original data set')
+kable(sse.pca, caption='SSE from PCA data')
+```
+
+```{r, cache=TRUE, echo=FALSE}
+tmpwinner = county_winner %>% ungroup %>%
+  mutate(state = state.name[match(state, state.abb)]) %>%               ## state abbreviations
+  mutate_at(vars(state, county), tolower) %>%                           ## to all lowercase
+  mutate(county = gsub(" county| columbia| city| parish", "", county))  ## remove suffixes
+tmpcensus = census.ct %>%ungroup%>% mutate_at(vars(State, County), tolower)
+
+election.c = tmpwinner %>%
+  left_join(tmpcensus, by = c("state"="State", "county"="County")) %>% 
+  na.omit
+
+## save meta information
+election.meta <- election.c %>% select(c(county, fips, state, votes, pct, total))
+
+## save predictors and class labels
+election.cl = election.c %>% select(-c(county, fips, state, votes, pct, total))
+M = which(election.c$state=='michigan')
+M = election.c[M,]
+election.cl
+```
+
+
+```{r train/test split, cache=TRUE, echo=FALSE}
+set.seed(10) 
+
+
+election.cl <- election.cl %>%
+  mutate(candidate=factor(candidate, levels=c('Donald Trump','Hillary Clinton')))
+
+n = nrow(election.cl)
+in.trn= sample.int(n, 0.8*n)
+#training set wiht 80% of data
+trn.cl = election.cl[ in.trn,]
+tst.cl = election.cl[-in.trn,]
+```
+
+```{r folds, echo=FALSE, cache=TRUE}
+#Creating 10 folds. 
+set.seed(20) 
+nfold = 10
+folds = sample(cut(1:nrow(trn.cl), breaks=nfold, labels=FALSE))
+```
+
+```{r calcerror, echo=FALSE, cache=TRUE}
+#calc_error_rate measures misclass error. 
+calc_error_rate = function(predicted.value, true.value){
+  return(mean(true.value!=predicted.value))
+}
+records = matrix(NA, nrow=3, ncol=2)
+colnames(records) = c("train.error","test.error")
+rownames(records) = c("tree","logreg","LASSO")
+```
+
+```{r Question 15, echo=FALSE, cache=TRUE}
+set.seed(1)
+
+#unpruned tree
+fulltree= tree(candidate~., data=trn.cl)
+draw.tree(fulltree, nodeinfo=TRUE, cex=0.47)
+title('Unpruned Classification Tree')
+cv=cv.tree(fulltree, FUN=prune.misclass, K=folds)
+
+#pruned tree
+ draw.tree(prune.tree(fulltree, best=10), nodeinfo=TRUE, cex=0.5)
+title("CV Classification Tree")
+```
+
+```{r records matrix, echo=FALSE, cache=TRUE}
+#finding train and test error for tree
+cvtree.pruned=prune.tree(fulltree, best=10)
+tree.pred.train = predict(cvtree.pruned, trn.cl, type="class")
+tree.pred.test = predict(cvtree.pruned, tst.cl, type="class")
+
+train_error_rate = calc_error_rate(tree.pred.train,trn.cl$candidate)
+test_error_rate = calc_error_rate(tree.pred.test,tst.cl$candidate)
+
+row1=c(train_error_rate, test_error_rate)
+row2=c('NA','NA')
+row3=c('NA', 'NA')
+records <- rbind(row1, row2, row3)
+colnames(records) <- c("train.error","test.error") 
+rownames(records) <- c("tree","logreg","LASSO")
+kable(records, caption='Records Matrix')
+```
+
+
+
+```{r Question 16 log regression, echo=FALSE, message=FALSE, cache=TRUE}
+
+#fit the logistic regression
+logreg = glm(candidate~., data=trn.cl, family="binomial")
+
+pred.train=predict(logreg, trn.cl, type='response')
+#create table of train and test predictions. 
+table.train=table(Truth = as.character(trn.cl$candidate), Prediction=ifelse(pred.train > 0.5, 'Hillary Clinton', 'Donald Trump'))
+```
+
+```{r log errors, echo=FALSE, cache=TRUE}
+#train and test error for logistic regression.
+train_error_log=1-sum(diag(table.train))/sum(table.train)
+pred.test=predict(logreg, tst.cl, type='response')
+table.test=table(Truth=as.character(tst.cl$candidate),Prediction=ifelse(pred.test > 0.5, 'Hillary Clinton', 'Donald Trump'))
+
+test_error_log=1-sum(diag(table.test))/sum(table.test)
+
+row1=c(train_error_rate, test_error_rate)
+row2=c(train_error_log,test_error_log)
+row3=c('NA', 'NA')
+records <- rbind(row1, row2, row3)
+colnames(records) <- c("train.error","test.error") 
+rownames(records) <- c("tree","logreg","LASSO")
+kable(records, caption='Records Matrix')
+```
+
+
+```{r Question 17,echo=FALSE, message=FALSE}
+#lasso regression.
+library(glmnet)
+set.seed(1)
+
+#code from lab
+xtrain=model.matrix(candidate~., trn.cl)[,-1]
+xtest=model.matrix(candidate~., tst.cl)[,-1]
+ytrain=trn.cl$candidate
+ytest=tst.cl$candidate
+
+#cv to find best lambda
+cv.out.lasso = glmnet::cv.glmnet(xtrain, as.character(ytrain),family='binomial' , alpha = 1)
+
+#plot of best lambda
+plot(cv.out.lasso) 
+best.lambda=cv.out.lasso$lambda.min
+#fit LASSO/Logistic model with best lambda
+lasso.fit=glmnet(xtrain, ytrain, alpha=1, lambda=best.lambda, family='binomial')
+#looking at lasso coeffecients
+lasso.coef=predict(lasso.fit,type="coefficients",s=best.lambda)[1:27,]
+
+
+#training predictions
+lasso.pred.train=predict(lasso.fit, s=best.lambda, type='response', newx = xtrain)
+#test predictions
+lasso.pred.test=predict(lasso.fit, s=best.lambda, type='response', newx = xtest)
+#change train pred to class
+p=ifelse(lasso.pred.train > 0.5, 'Hillary Clinton', 'Donald Trump')
+#calc test error
+train_error_lasso=calc_error_rate(p, trn.cl$candidate)
+##change test pred to class
+test.lasso=ifelse(lasso.pred.test > 0.5, 'Hillary Clinton', 'Donald Trump')
+#calc test error 
+test_error_lasso=calc_error_rate(test.lasso, tst.cl$candidate)
+
+
+row1=c(train_error_rate, test_error_rate)
+row2=c(train_error_log,test_error_log)
+row3=c(train_error_lasso, test_error_lasso)
+records <- rbind(row1, row2, row3)
+colnames(records) <- c("train.error","test.error") 
+rownames(records) <- c("tree","logreg","LASSO")
+kable(records, caption= 'Records Matrix')
+
+```
+
+
+```{r ROC Tree, cache=TRUE, echo=FALSE}
+library(ROCR)
+tree.pred.test = data.frame(predict(cvtree.pruned, tst.cl, type="vector"))
+pred.tree=prediction(tree.pred.test$Hillary.Clinton, as.character(tst.cl$candidate))
+perf.tree=performance(pred.tree, measure = 'tpr', x.measure = 'fpr')
+
+auc.tree=performance(pred.tree,'auc')@y.values
+
+```
+
+```{r ROC logreg, cache=TRUE, echo=FALSE}
+pred.test=predict(logreg, tst.cl, type='response')
+pred.logreg=prediction(pred.test, as.character(tst.cl$candidate))
+perf.logreg=performance(pred.logreg, measure = 'tpr', x.measure = 'fpr') 
+
+auc.logreg=performance(pred.logreg,'auc')@y.values
+
+
+```
+
+```{r,  echo=FALSE, cache=TRUE}
+lasso.pred.test=predict(lasso.fit, s=best.lambda, type='response', newx = xtest)
+pred.lasso=prediction(lasso.pred.test, as.character(tst.cl$candidate))
+perf.lasso=performance(pred.lasso, measure='tpr', x.measure='fpr')
+
+auc.lasso=performance(pred.lasso,'auc')@y.values
+
+# lasso has better performance
+```
+
+Red ROC is tree. Blue is logreg, Black is LASSO. 
+```{r, echo=FALSE, cache=TRUE}
+#tree ROC
+plot(perf.tree, col=2, lwd=3, main="ROC curve")
+##logreg ROC
+plot(perf.logreg, col='blue',add=TRUE, lwd=3, main="ROC curve")
+##LASSO tree
+plot(perf.lasso, col='black',add=TRUE, lwd=3, main="Lasso ROC curve")
+#y=x line
+abline(0,1)
+```
+
+```{r AUC, echo=FALSE, message=FALSE}
+row1=c(auc.tree)
+row2=c(auc.logreg)
+row3=c(auc.lasso)
+AUC <- rbind(row1, row2, row3)
+colnames(AUC) <- c("AUC") 
+rownames(AUC) <- c("tree","logreg","LASSO")
+kable(AUC, caption='AUC Matrix')
+```
+
+
+
+
+
+
+
+##Question 19
+```{r random forest, echo=FALSE, cache=TRUE}
+set.seed(1)
+#fit random forest, m=root(p), n=500
+rf.election = randomForest(trn.cl$candidate~., data=trn.cl, importance=TRUE)
+
+
+forest.pred= predict(rf.election, tst.cl, type='prob')
+forest.pred.train= predict(rf.election, trn.cl, type='prob')
+prob.train=ifelse(forest.pred.train[,2]> 0.5, 'Hillary Clinton', 'Donald Trump')
+
+prob=ifelse(forest.pred[,2]> 0.5, 'Hillary Clinton', 'Donald Trump')
+
+rf.test=calc_error_rate(prob, tst.cl$candidate)
+rf.train=calc_error_rate(prob.train, trn.cl$candidate)
+
+#which are the most important variables
+varImpPlot(rf.election, cex=.5)
+```
+
+```{r rf records, echo=FALSE, cache=TRUE}
+row1=c(train_error_rate, test_error_rate)
+row2=c(train_error_log,test_error_log)
+row3=c(train_error_lasso, test_error_lasso)
+row4=c(rf.train, rf.test)
+row5 = c('NA', 'NA')
+records <- rbind(row1, row2, row3,  row4, row5)
+colnames(records) <- c("train.error","test.error") 
+rownames(records) <- c("tree","logreg","LASSO",'Random Forest',  "SVM")
+
+kable(records, caption='Records Matrix')
+
+```
+
+
+
+```{r 19 svm fit, echo=FALSE, cache=TRUE}
+library(e1071)
+
+tune.out=tune(svm, candidate~., data= trn.cl, kernel="radial",probability=TRUE, ranges=list(cost=c(.001,.01, 0.1,1,10,100)))
+
+pred.svm=predict(tune.out$best.model, newdata=trn.cl, type='class')
+```
+
+
+```{r SVM Fit, echo=FALSE, cache=TRUE}
+set.seed(1)
+library(e1071)
+svmfit=svm(candidate~., data=trn.cl, kernel='radial', cost=10)
+
+svm.predict.test=predict(svmfit, newdata = tst.cl, type='class')
+svm.predict.train = predict(svmfit, newdata = trn.cl, type = 'class')
+
+table.svm=table(Truth=tst.cl$candidate, prediction=svm.predict.test)
+
+
+svm_error_rate_train = calc_error_rate(svm.predict.train,trn.cl$candidate)
+svm_error_rate_test = calc_error_rate(svm.predict.test,tst.cl$candidate)
+
+
+row1=c(train_error_rate, test_error_rate)
+row2=c(train_error_log,test_error_log)
+row3=c(train_error_lasso, test_error_lasso)
+row4=c(rf.train, rf.test)
+row5 = c(svm_error_rate_train, svm_error_rate_test)
+records <- rbind(row1, row2, row3,  row4, row5)
+colnames(records) <- c("train.error","test.error") 
+rownames(records) <- c("tree","logreg","LASSO",'Random Forest',  "SVM")
+
+kable(records, caption='Records Matrix')
+```
+
+
+```{r Question 19, echo=FALSE , cache=TRUE}
+#creating a sample of swing blue and red states. 
+swing= subset(election.c, state == 'michigan' | state=='ohio' |state=='florida' | state=='pennsylvania' |state=='nevada' |state=='north carolina' )
+
+blue.state = subset(election.c, state == 'california' | state == 'washington' |state == 'new york' | state == 'oregon')
+red.state = subset( election.c, state == 'texas' | state == 'georgia' |state == 'kentucky' | state == ' virginia')
+```
+
+```{r train/test for swing red blue, echo=FALSE, cache=TRUE}
+#prepping new dataframes for classification
+swing.1= swing[, -c(1, 2, 4)]
+set.seed(10) 
+n = nrow(swing.1)
+in.trn= sample.int(n, 0.8*n) 
+trn.swing = election.cl[ in.trn,]
+tst.swing = election.cl[-in.trn,]
+set.seed(20) 
+nfold = 10
+folds.swing = sample(cut(1:nrow(trn.swing), breaks=nfold, labels=FALSE))
+
+blue= blue.state[, -c(1, 2, 4)]
+set.seed(10) 
+nblue = nrow(blue)
+in.trn.blue= sample.int(nblue, 0.8*nblue) 
+trn.blue = election.cl[ in.trn.blue,]
+tst.blue = election.cl[-in.trn.blue,]
+set.seed(20) 
+nfold = 10
+folds.blue = sample(cut(1:nrow(trn.blue), breaks=nfold, labels=FALSE))
+
+red= red.state[, -c(1, 2, 4)]
+set.seed(10) 
+nred = nrow(red)
+in.trn.red= sample.int(nred, 0.8*nred) 
+trn.red = election.cl[ in.trn.red,]
+tst.red = election.cl[-in.trn.red,]
+set.seed(20) 
+nfold = 10
+folds.red = sample(cut(1:nrow(trn.red), breaks=nfold, labels=FALSE))
+```
+
+
+```{r swing newtree model, echo=FALSE, cache=TRUE}
+#swing tree
+fullswing = tree(candidate ~ ., data=trn.swing)
+swing.tree=cv.tree(fullswing, FUN=prune.misclass, K=folds.swing)
+
+draw.tree(prune.tree(fullswing, best=9), nodeinfo = TRUE, cex=0.5)
+
+#tree still splits on transit. 
+```
+
+```{r blue tree, echo=FALSE, cache=TRUE}
+#blue tree
+fullblue = tree(candidate ~ ., data=trn.blue)
+blue.tree=cv.tree(fullblue, FUN=prune.misclass, K=folds.blue)
+
+draw.tree(prune.tree(fullblue, best=9), nodeinfo = TRUE, cex=0.5)
+```
+
+```{r red tree, echo=FALSE, cache=TRUE}
+#red tree
+fullred = tree(candidate ~ ., data=trn.red)
+red.tree=cv.tree(fullred, FUN=prune.misclass, K=folds.red)
+
+draw.tree(prune.tree(fullred, best=9), nodeinfo = TRUE, cex=0.5)
+```
+
+
+
+```{r logistic regression swing,  echo=FALSE, cache=TRUE}
+#determine whether to print summary. 
+
+#swing logistic regression
+swing.log= glm(candidate~., data=trn.swing, family=binomial)
+#summary(swing.log)
+#summary(logreg)
+
+
+## variables like minority, transit, and carpool are much more significant and bigger in the swing state regression. With all the states, familywork. Professional is no longer significant. Predictors like unemployment, and service remain signifiicant predictors across both regressions. 
+
+#blue logistic regression
+swing.blue= glm(candidate~., data=trn.blue, family=binomial)
+#summary(swing.blue)
+#summary(logreg)
+
+#Professional and Service, Production are very significant. Method of transportations are very significant. Income is totally not significant. In a blue state it doesnt really matter, because they vote democrat anyway. Seems like a lot of these variables dont matter, people just vote blue all the time. 
+
+#red logistic regression.
+swing.red= glm(candidate~., data=trn.red, family=binomial)
+#summary(swing.red)
+#summary(logreg)
+
+#Family work is very significant and large. White is a large significant coef.  
+```
+
+```{r lasso red blue,  echo=FALSE, cache=TRUE}
+#All models, and espescially lasso show that poverty isn't really important. 
+
+#blue LASSO
+x.blue=model.matrix(candidate~., trn.blue)[,-1]
+y.blue=trn.blue$candidate
+
+cv.out.blue = glmnet:: cv.glmnet(x.blue, as.character(y.blue), family='binomial', alpha=1, foldid=folds.blue)
+lambda.blue=cv.out.blue$lambda.min
+lasso.blue=predict(cv.out.blue,type="coefficients",s=lambda.blue)[1:27,]
+
+#summary(logreg)
+#men, white, poverty, service, office, frive, employed. Lot of coefs go to 0. Professional and Service go to 0.  
+
+#red LASSO
+x.red=model.matrix(candidate~., trn.red)[,-1]
+y.red=trn.red$candidate
+
+cv.out.red = glmnet:: cv.glmnet(x.red, as.character(y.red), family='binomial', alpha=1, foldid=folds.red)
+lambda.red=cv.out.red$lambda.min
+lasso.red=predict(cv.out.red,type="coefficients",s=lambda.red)[1:27,]
+
+
+#summary(swing.red)
+
+#coefs for red states are much different that blue states. Lot more non zeros, so they care about a lot more topics. Important predictors remain FamilyWork, Carpool, Unemployment. 
+
+#swing LASSO
+x.swing=model.matrix(candidate~., trn.swing)[,-1]
+y.swing=trn.swing$candidate
+
+cv.out.swing = glmnet:: cv.glmnet(x.swing, as.character(y.swing), family='binomial', alpha=1, foldid=folds.swing)
+lambda.swing=cv.out.swing$lambda.min
+lasso.swing=predict(cv.out.swing,type="coefficients",s=lambda.swing)[1:27,]
+
+#summary(swing.log)
+
+#Transit is 0, so perhaps transit does not matter as much?? Professional and Service Employed Family work all remain important predictors.  
+```
+
+```{r Question ten, echo=FALSE, results='hide', eval=FALSE}
+par(mar=c(1,1,1,1))
+par(mfrow=c(3,4))
+##Minority vs Income
+ggplot(data=election.cl)+geom_point(mapping=aes(x=Income, y=Minority, color=candidate))+ggtitle('Minority vs Income All States')
+ggplot(data=swing)+geom_point(mapping=aes(x=Income, y=Minority, color=candidate))+ggtitle('Minority vs Income Swing States')
+ggplot(data=red)+geom_point(mapping=aes(x=Income, y=Minority, color=candidate))+ggtitle('Minority vs Income Red States')
+ggplot(data=blue)+geom_point(mapping=aes(x=Income, y=Minority, color=candidate))+ggtitle('Minority vs Income Blue States')
+
+
+
+ggplot(data=election.cl)+geom_point(mapping=aes(x=Employed, y=FamilyWork, color=candidate))+ggtitle('Transit vs Employed All States')
+ggplot(data=swing)+geom_point(mapping=aes(x=Employed, y=FamilyWork, color=candidate))+ggtitle('Transit vs Employed Swing States')
+ggplot(data=red)+geom_point(mapping=aes(x=Employed, y=FamilyWork, color=candidate))+ggtitle('Transit vs Employed Red States')
+ggplot(data=blue)+geom_point(mapping=aes(x=Employed, y=FamilyWork, color=candidate))+ggtitle('Transit vs Employed Blue States')
+
+
+ggplot(data=election.cl)+geom_point(mapping=aes(x=Professional, y=Service, color=candidate))+ggtitle('Professional vs Service All States')
+ggplot(data=swing)+geom_point(mapping=aes(x=Professional, y=Service, color=candidate))+ggtitle('Professional vs Service Swing States')
+ggplot(data=red)+geom_point(mapping=aes(x=Professional, y=Service, color=candidate))+ggtitle('Professional vs Service Red States')
+ggplot(data=blue)+geom_point(mapping=aes(x=Professional, y=Service, color=candidate))+ggtitle('Professional vs Service Blue States')
+
+```
